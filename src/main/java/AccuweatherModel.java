@@ -1,13 +1,18 @@
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import entity.Forecast;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
+import java.io.DataInput;
 import java.io.IOException;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
 public class AccuweatherModel implements WeatherModel {
     //http://dataservice.accuweather.com/forecasts/v1/daily/1day/349727
@@ -27,8 +32,9 @@ public class AccuweatherModel implements WeatherModel {
 
     private static final OkHttpClient okHttpClient = new OkHttpClient();
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private DataBaseRepository dataBaseRepository = new DataBaseRepository( );
 
-    public void getWeather(String selectedCity, Period period) throws IOException {
+    public void getWeather(String selectedCity, Period period) throws IOException, SQLException {
         switch (period) {
             case NOW:
                 HttpUrl httpUrl = new HttpUrl.Builder()
@@ -56,6 +62,22 @@ public class AccuweatherModel implements WeatherModel {
 
                 System.out.println("В городе - " + selectedCity);
                 forecastDaysAsText(weatherResponse);
+                //saveResponseOnDB(weatherResponse, selectedCity);
+
+                ForecastDay forecastDayFromJSON = new ForecastDay();
+                Iterator<JsonNode> forecastDayJSON = objectMapper
+                        .readTree(weatherResponse)
+                        .at("/DailyForecasts")
+                        .iterator();
+                while (forecastDayJSON.hasNext()) {
+                    String forecastJSON = forecastDayJSON.next().toString();
+                    forecastDayFromJSON = objectMapper.readValue(forecastJSON, ForecastDay.class);
+                }
+                dataBaseRepository.saveForecastToDB(new Forecast(selectedCity,
+                        forecastDayFromJSON.getDate(),
+                        forecastDayFromJSON.getTemperature().getMinimum().getValue(),
+                        forecastDayFromJSON.getTemperature().getMaximum().getValue())
+                );
                 break;
 
             case FIVE_DAYS:
@@ -82,8 +104,28 @@ public class AccuweatherModel implements WeatherModel {
 
                 System.out.println("В городе - " + selectedCity);
                 forecastDaysAsText(weatherResponse5days);
+
+                List<Forecast> forecastList = new ArrayList<>();
+                Iterator<JsonNode> forecastDaysJSON = objectMapper
+                        .readTree(weatherResponse5days)
+                        .at("/DailyForecasts")
+                        .iterator();
+                while (forecastDaysJSON.hasNext()) {
+                    String forecastJSON = forecastDaysJSON.next().toString();
+                    forecastDayFromJSON = objectMapper.readValue(forecastJSON, ForecastDay.class);
+                    forecastList.add(new Forecast(selectedCity,
+                            forecastDayFromJSON.getDate(),
+                            forecastDayFromJSON.getTemperature().getMinimum().getValue(),
+                            forecastDayFromJSON.getTemperature().getMaximum().getValue()));
+                }
+                dataBaseRepository.saveForecastToDB(forecastList);
                 break;
         }
+    }
+
+    @Override
+    public List<Forecast> getSavedToDBWeather(String city) {
+        return dataBaseRepository.getSavedToDBForecast(city);
     }
 
     private String detectCityKey(String selectCity) throws IOException {
